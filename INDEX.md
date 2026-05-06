@@ -61,7 +61,7 @@ Quick overview (~5 minutes)
 
 ### Main Script
 ```
-delete_duplicates.py          27 KB      Production-grade deduplication tool
+dup_sniper.py          27 KB      Production-grade deduplication tool
 ```
 
 ### Documentation
@@ -104,19 +104,19 @@ DUPLICATES/                   Variable   Folder with moved duplicates
 1. **QUICKSTART.md** (5 min) - Get running
 2. **README_DEDUPLICATION.md** (20 min) - Understand algorithms
 3. **ADVANCED_USAGE.md** (20 min) - Learn customization
-4. Review `delete_duplicates.py` source (well-commented)
+4. Review `dup_sniper.py` source (well-commented)
 
 ### 🚀 **For DevOps/ML Engineers** (goal: production deployment)
 1. **SUMMARY.md** (5 min) - Quick overview
 2. **ADVANCED_USAGE.md** (20 min) - Optimization strategies
 3. **README_DEDUPLICATION.md** (20 min) - Full reference
-4. **delete_duplicates.py** (source review) - Implementation details
+4. **dup_sniper.py** (source review) - Implementation details
 
 ### 🔧 **For Power Users** (goal: master the tool)
 1. **QUICKSTART.md** (5 min) - Basic usage
 2. **ADVANCED_USAGE.md** (20 min) - Advanced techniques
 3. **README_DEDUPLICATION.md** (30 min) - Deep dive
-4. **delete_duplicates.py** (source) - Study implementation
+4. **dup_sniper.py** (source) - Study implementation
 
 ---
 
@@ -129,18 +129,18 @@ pip install -r requirements.txt
 
 ### Basic Usage
 ```bash
-python delete_duplicates.py "C:/images"
+python dup_sniper.py "C:/images"
 ```
 
 ### Common Commands
 
 | Goal | Command |
 |------|---------|
-| **Standard** | `python delete_duplicates.py path` |
-| **Aggressive** | `python delete_duplicates.py path --similarity 0.75` |
-| **Conservative** | `python delete_duplicates.py path --similarity 0.90` |
-| **Fast (16 threads)** | `python delete_duplicates.py path --threads 16` |
-| **Custom output** | `python delete_duplicates.py path --duplicates-dir path/to/dups` |
+| **Standard** | `python dup_sniper.py path` |
+| **Aggressive** | `python dup_sniper.py path --similarity 0.75` |
+| **Conservative** | `python dup_sniper.py path --similarity 0.90` |
+| **Fast (16 threads)** | `python dup_sniper.py path --threads 16` |
+| **Custom output** | `python dup_sniper.py path --duplicates-dir path/to/dups` |
 
 ### Key Concepts
 
@@ -242,7 +242,7 @@ python delete_duplicates.py "C:/images"
 
 ## File Descriptions
 
-### `delete_duplicates.py` (27 KB)
+### `dup_sniper.py` (27 KB)
 The main script. Contains:
 - Configuration constants
 - Database cache management
@@ -338,7 +338,7 @@ A: Yes. See ADVANCED_USAGE.md → Integration with Other Tools
 2. Read: **QUICKSTART.md** (5 min)
 
 ### 📊 **Immediate Usage**
-1. Test on small folder: `python delete_duplicates.py test_folder`
+1. Test on small folder: `python dup_sniper.py test_folder`
 2. Review results in `DUPLICATES/` folder
 3. Check `dedupe_log.txt` for details
 
@@ -350,7 +350,7 @@ A: Yes. See ADVANCED_USAGE.md → Integration with Other Tools
 
 ### 🎓 **Mastery**
 1. Read: **ADVANCED_USAGE.md** (20 min)
-2. Study: `delete_duplicates.py` source
+2. Study: `dup_sniper.py` source
 3. Optimize: Customize for your use case
 
 ---
@@ -380,3 +380,4 @@ A: Yes. See ADVANCED_USAGE.md → Integration with Other Tools
 **Happy deduplicating!** 🚀
 
 *All documentation is searchable - use Ctrl+F to find specific topics.*
+

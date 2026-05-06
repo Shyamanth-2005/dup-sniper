@@ -27,7 +27,7 @@ for subdir in sorted(os.listdir(base_dir)):
         dup_dir = os.path.join(subdir_path, "DUPLICATES")
         
         cmd = [
-            "python", "delete_duplicates.py",
+            "python", "dup_sniper.py",
             subdir_path,
             "--duplicates-dir", dup_dir,
             "--similarity", "0.83",
@@ -43,13 +43,13 @@ Process with increasing strictness:
 
 ```bash
 # Stage 1: Quick pass - only obvious duplicates (0.95 = very high threshold)
-python delete_duplicates.py "/images" --similarity 0.95 --duplicates-dir "/dups1"
+python dup_sniper.py "/images" --similarity 0.95 --duplicates-dir "/dups1"
 
 # Stage 2: Medium pass - moderate duplicates (0.85)
-python delete_duplicates.py "/images" --similarity 0.85 --duplicates-dir "/dups2"
+python dup_sniper.py "/images" --similarity 0.85 --duplicates-dir "/dups2"
 
 # Stage 3: Deep pass - catch subtle duplicates (0.75)
-python delete_duplicates.py "/images" --similarity 0.75 --duplicates-dir "/dups3"
+python dup_sniper.py "/images" --similarity 0.75 --duplicates-dir "/dups3"
 ```
 
 **Why**: Each stage is faster because it processes fewer images
@@ -60,10 +60,10 @@ For 1M+ images, split across multiple machines:
 
 ```bash
 # Machine 1: Process A-D directories
-python delete_duplicates.py "/data/A" --duplicates-dir "/dup/A"
-python delete_duplicates.py "/data/B" --duplicates-dir "/dup/B"
-python delete_duplicates.py "/data/C" --duplicates-dir "/dup/C"
-python delete_duplicates.py "/data/D" --duplicates-dir "/dup/D"
+python dup_sniper.py "/data/A" --duplicates-dir "/dup/A"
+python dup_sniper.py "/data/B" --duplicates-dir "/dup/B"
+python dup_sniper.py "/data/C" --duplicates-dir "/dup/C"
+python dup_sniper.py "/data/D" --duplicates-dir "/dup/D"
 
 # Machine 2: Process E-H directories (in parallel)
 # Machine 3: Process I-L directories (in parallel)
@@ -77,31 +77,31 @@ python delete_duplicates.py "/data/D" --duplicates-dir "/dup/D"
 ### Photography/Nature Images
 ```bash
 # High similarity - preserve subtle variations
-python delete_duplicates.py "/photos" --similarity 0.88
+python dup_sniper.py "/photos" --similarity 0.88
 ```
 
 ### Product/E-commerce
 ```bash
 # Medium similarity - standardized products
-python delete_duplicates.py "/products" --similarity 0.83
+python dup_sniper.py "/products" --similarity 0.83
 ```
 
 ### Screenshots/Documents
 ```bash
 # Low similarity - identical screenshots common
-python delete_duplicates.py "/screenshots" --similarity 0.78
+python dup_sniper.py "/screenshots" --similarity 0.78
 ```
 
 ### Machine Learning Training Data
 ```bash
 # Aggressive - remove near-duplicates for model quality
-python delete_duplicates.py "/training_data" --similarity 0.80
+python dup_sniper.py "/training_data" --similarity 0.80
 ```
 
 ### Social Media Content
 ```bash
 # Moderate - catch reposts but keep variations
-python delete_duplicates.py "/social_media" --similarity 0.82
+python dup_sniper.py "/social_media" --similarity 0.82
 ```
 
 ---
@@ -111,7 +111,7 @@ python delete_duplicates.py "/social_media" --similarity 0.82
 ### Using as a Library
 
 ```python
-from delete_duplicates import deduplicate, cache_db
+from dup_sniper import deduplicate, cache_db
 
 # Custom deduplication workflow
 def process_company_images():
@@ -183,7 +183,7 @@ conn.close()
 
 Reduce batch size in the source code:
 ```python
-# In delete_duplicates.py, change:
+# In dup_sniper.py, change:
 BATCH_SIZE = 100  # Reduced from 500 for large files
 ```
 
@@ -191,21 +191,21 @@ BATCH_SIZE = 100  # Reduced from 500 for large files
 
 ```bash
 # Use fewer threads to reduce memory footprint
-python delete_duplicates.py "/images" --threads 2
+python dup_sniper.py "/images" --threads 2
 ```
 
 ### Monitor Resource Usage
 
 ```bash
 # Linux/Mac
-python delete_duplicates.py "/images" | while read line; do 
+python dup_sniper.py "/images" | while read line; do 
     echo "$line"
     free -h | grep Mem
 done
 
 # Windows (PowerShell)
 # Run in background and monitor
-Start-Process python -ArgumentList 'delete_duplicates.py "C:/images"'
+Start-Process python -ArgumentList 'dup_sniper.py "C:/images"'
 Get-Process python | Select-Object WS
 ```
 
@@ -271,9 +271,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY delete_duplicates.py .
+COPY dup_sniper.py .
 
-ENTRYPOINT ["python", "delete_duplicates.py"]
+ENTRYPOINT ["python", "dup_sniper.py"]
 CMD ["/data", "--similarity", "0.85"]
 ```
 
@@ -287,7 +287,7 @@ docker run -v /my/images:/data dedupe /data
 
 ```bash
 # Run daily at 2 AM
-0 2 * * * /usr/bin/python3 /home/user/delete_duplicates.py /home/user/images --threads 8 >> /home/user/dedupe.log 2>&1
+0 2 * * * /usr/bin/python3 /home/user/dup_sniper.py /home/user/images --threads 8 >> /home/user/dedupe.log 2>&1
 ```
 
 ---
@@ -301,7 +301,7 @@ Different EXIF data but identical content:
 ```bash
 # These will be caught as exact duplicates (MD5 based)
 # EXIF data won't affect MD5 hash
-python delete_duplicates.py "/photos" --similarity 0.85
+python dup_sniper.py "/photos" --similarity 0.85
 ```
 
 ### Case 2: Watermarked vs Non-watermarked
@@ -310,7 +310,7 @@ Slight pixel differences due to watermark:
 
 ```bash
 # Use moderate-low threshold to catch these
-python delete_duplicates.py "/content" --similarity 0.75
+python dup_sniper.py "/content" --similarity 0.75
 ```
 
 ### Case 3: Different Formats (JPG, PNG, WEBP)
@@ -320,7 +320,7 @@ Same image in different formats:
 ```bash
 # Won't catch as exact duplicate (different MD5)
 # But WILL catch in Stage 5 (ensemble method)
-python delete_duplicates.py "/mixed_formats" --similarity 0.82
+python dup_sniper.py "/mixed_formats" --similarity 0.82
 ```
 
 ### Case 4: Thumbnail Versions
@@ -330,7 +330,7 @@ Images downscaled to thumbnails:
 ```bash
 # SIFT detects scale changes (Stage 5)
 # Caught via ensemble similarity
-python delete_duplicates.py "/with_thumbnails" --similarity 0.80
+python dup_sniper.py "/with_thumbnails" --similarity 0.80
 ```
 
 ---
@@ -358,7 +358,7 @@ Tested on Intel i7-12700K, 32GB RAM, SSD:
 ulimit -n 65536
 
 # Then run
-python delete_duplicates.py "/images" --threads 16
+python dup_sniper.py "/images" --threads 16
 ```
 
 ### Issue: Out of Memory on large images
@@ -376,7 +376,7 @@ find /images -name "*.jpg" -exec du -h {} \; | sort -rh | head -10
 
 **Solution**: Skip SIFT for very large datasets
 ```python
-# Modify ensemble weights in delete_duplicates.py
+# Modify ensemble weights in dup_sniper.py
 # Skip SIFT (computationally expensive)
 scores = [orb_sim, hist_sim]
 weights = [0.90, 0.10]  # ORB + Histogram only
@@ -385,3 +385,4 @@ weights = [0.90, 0.10]  # ORB + Histogram only
 ---
 
 **Advanced deduplication mastery unlocked!** 🚀
+

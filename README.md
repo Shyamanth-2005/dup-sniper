@@ -64,33 +64,33 @@ pip install faiss-cpu  # Or faiss-gpu if you have NVIDIA GPU
 ### Basic Usage
 
 ```bash
-python delete_duplicates.py "C:/path/to/images"
+python dup_sniper.py "C:/path/to/images"
 ```
 
 ### Advanced Usage
 
 ```bash
 # Specify output directory for duplicates
-python delete_duplicates.py "C:/images" --duplicates-dir "C:/duplicates_found"
+python dup_sniper.py "C:/images" --duplicates-dir "C:/duplicates_found"
 
 # Adjust similarity threshold (0.75-0.90)
-python delete_duplicates.py "C:/images" --similarity 0.82
+python dup_sniper.py "C:/images" --similarity 0.82
 
 # Use specific number of processing threads
-python delete_duplicates.py "C:/images" --threads 12
+python dup_sniper.py "C:/images" --threads 12
 ```
 
 ### Examples
 
 ```bash
 # Aggressive deduplication (removes even subtle variations)
-python delete_duplicates.py "/data/images" --similarity 0.75 --threads 8
+python dup_sniper.py "/data/images" --similarity 0.75 --threads 8
 
 # Balanced (recommended for most cases)
-python delete_duplicates.py "/data/images" --similarity 0.85 --threads auto
+python dup_sniper.py "/data/images" --similarity 0.85 --threads auto
 
 # Conservative (keeps more originals, only removes obvious duplicates)
-python delete_duplicates.py "/data/images" --similarity 0.90
+python dup_sniper.py "/data/images" --similarity 0.90
 ```
 
 ## Similarity Thresholds Explained
@@ -226,7 +226,7 @@ The tool **always keeps the highest quality image** in each duplicate group.
 ```bash
 # If the process was interrupted, simply run again
 # The tool will check the cache and skip already-processed images
-python delete_duplicates.py "C:/images" --duplicates-dir "C:/duplicates_found"
+python dup_sniper.py "C:/images" --duplicates-dir "C:/duplicates_found"
 ```
 
 ## Advanced Scenarios
@@ -237,7 +237,7 @@ python delete_duplicates.py "C:/images" --duplicates-dir "C:/duplicates_found"
 
 **Solution**:
 ```bash
-python delete_duplicates.py "/data/training_images" \
+python dup_sniper.py "/data/training_images" \
   --similarity 0.82 \
   --duplicates-dir "/data/training_removed" \
   --threads 16
@@ -251,7 +251,7 @@ python delete_duplicates.py "/data/training_images" \
 
 **Solution**:
 ```bash
-python delete_duplicates.py "/photos" \
+python dup_sniper.py "/photos" \
   --similarity 0.85 \
   --duplicates-dir "/photos/duplicates"
 ```
@@ -264,7 +264,7 @@ python delete_duplicates.py "/photos" \
 
 **Solution**:
 ```bash
-python delete_duplicates.py "/archive" \
+python dup_sniper.py "/archive" \
   --similarity 0.88 \
   --duplicates-dir "/archive/duplicate_cleanup" \
   --threads 8
@@ -279,7 +279,7 @@ python delete_duplicates.py "/archive" \
 **Solution**:
 ```bash
 # Run with monitoring
-nohup python delete_duplicates.py "/massive_dataset" \
+nohup python dup_sniper.py "/massive_dataset" \
   --similarity 0.83 \
   --duplicates-dir "/massive_dataset/dups" \
   --threads 16 > dedupe_run.log 2>&1 &
@@ -337,7 +337,7 @@ tail -f dedupe_run.log
 **Solution**:
 ```bash
 # Reduce threads to lower memory usage
-python delete_duplicates.py "/images" --threads 4
+python dup_sniper.py "/images" --threads 4
 ```
 
 ### Issue: Very Slow Processing
@@ -347,7 +347,7 @@ python delete_duplicates.py "/images" --threads 4
 **Solution**:
 ```bash
 # Ensure SSD storage; increase threads for more parallelism
-python delete_duplicates.py "/images" --threads 16
+python dup_sniper.py "/images" --threads 16
 
 # If on network drive, copy to local SSD first
 ```
@@ -359,7 +359,7 @@ python delete_duplicates.py "/images" --threads 16
 **Solution**:
 ```bash
 # Increase similarity threshold to be more conservative
-python delete_duplicates.py "/images" --similarity 0.90
+python dup_sniper.py "/images" --similarity 0.90
 ```
 
 ### Issue: Missing Duplicates
@@ -369,7 +369,7 @@ python delete_duplicates.py "/images" --similarity 0.90
 **Solution**:
 ```bash
 # Lower similarity threshold to catch more
-python delete_duplicates.py "/images" --similarity 0.78
+python dup_sniper.py "/images" --similarity 0.78
 
 # Check duplicates folder - review manually if uncertain
 ```
@@ -383,7 +383,7 @@ python delete_duplicates.py "/images" --similarity 0.78
 
 2. **Test with Small Dataset First**: Validate behavior on subset
    ```bash
-   python delete_duplicates.py "/images/test_100" --similarity 0.85
+   python dup_sniper.py "/images/test_100" --similarity 0.85
    ```
 
 3. **Review Duplicates Folder**: Manually spot-check moved images
@@ -396,7 +396,7 @@ python delete_duplicates.py "/images" --similarity 0.78
 
 5. **Run During Off-Peak**: Large datasets take time; run overnight
    ```bash
-   nohup python delete_duplicates.py "/images" & 
+   nohup python dup_sniper.py "/images" & 
    ```
 
 6. **Monitor Logs**: Check dedupe_log.txt for issues
@@ -411,7 +411,7 @@ python delete_duplicates.py "/images" --similarity 0.78
 ```python
 # Run in phases by subdirectory
 for subdir in /massive_dataset/*/; do
-  python delete_duplicates.py "$subdir" --threads 16
+  python dup_sniper.py "$subdir" --threads 16
 done
 ```
 
@@ -419,10 +419,10 @@ done
 
 ```bash
 # First run
-python delete_duplicates.py "/images" --duplicates-dir "/dup1"
+python dup_sniper.py "/images" --duplicates-dir "/dup1"
 
 # Subsequent runs use cached hashes (much faster)
-python delete_duplicates.py "/images" --duplicates-dir "/dup2"
+python dup_sniper.py "/images" --duplicates-dir "/dup2"
 ```
 
 ## File Size Behavior
@@ -448,7 +448,7 @@ The tool ensures:
 ## API Usage (Python)
 
 ```python
-from delete_duplicates import deduplicate
+from dup_sniper import deduplicate
 
 # Use programmatically
 deduplicate(
@@ -515,3 +515,4 @@ For issues, improvements, or suggestions, review the log files first to understa
 ---
 
 **Happy deduplicating! 🎉**
+

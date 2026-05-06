@@ -8,7 +8,7 @@ A **production-grade, enterprise-ready image deduplication system** capable of h
 
 ## Files Created
 
-### 1. **delete_duplicates.py** (Main Script)
+### 1. **dup_sniper.py** (Main Script)
 - ✅ **5-Stage Detection Pipeline** (exact → rotated → resized → color/brightness → visually similar)
 - ✅ **Multi-Algorithm Ensemble** (MD5 + phash + dhash + whash + SIFT + ORB + histogram)
 - ✅ **SQLite Cache System** for fast re-runs
@@ -137,12 +137,12 @@ pip install -r requirements.txt
 
 ### Step 2: Test
 ```bash
-python delete_duplicates.py "C:/test_images"
+python dup_sniper.py "C:/test_images"
 ```
 
 ### Step 3: Run Production
 ```bash
-python delete_duplicates.py "C:/your_images" --similarity 0.85 --threads 8
+python dup_sniper.py "C:/your_images" --similarity 0.85 --threads 8
 ```
 
 ---
@@ -151,19 +151,19 @@ python delete_duplicates.py "C:/your_images" --similarity 0.85 --threads 8
 
 ```bash
 # Aggressive (removes most duplicates)
-python delete_duplicates.py path --similarity 0.75
+python dup_sniper.py path --similarity 0.75
 
 # Balanced (RECOMMENDED)
-python delete_duplicates.py path --similarity 0.85
+python dup_sniper.py path --similarity 0.85
 
 # Conservative (keeps more originals)
-python delete_duplicates.py path --similarity 0.90
+python dup_sniper.py path --similarity 0.90
 
 # Fast mode
-python delete_duplicates.py path --threads 16
+python dup_sniper.py path --threads 16
 
 # Slow but thorough
-python delete_duplicates.py path --threads 2 --similarity 0.80
+python dup_sniper.py path --threads 2 --similarity 0.80
 ```
 
 ---
@@ -362,9 +362,10 @@ Your advanced image deduplication tool is ready for:
 
 **Start with:**
 ```bash
-python delete_duplicates.py "C:/your_images"
+python dup_sniper.py "C:/your_images"
 ```
 
-**Questions?** Check the documentation files or review the detailed comments in delete_duplicates.py
+**Questions?** Check the documentation files or review the detailed comments in dup_sniper.py
 
 **Happy deduplicating!** 🎉
+

@@ -36,7 +36,7 @@ db/.dedupe_cache.db     ← New db folder
 ## How to Use:
 ```bash
 # Works exactly as before
-python delete_duplicates.py "C:/images"
+python dup_sniper.py "C:/images"
 
 # Folders will be created automatically:
 # logs/dedupe_log.txt       ← Operation log
@@ -47,7 +47,7 @@ python delete_duplicates.py "C:/images"
 ## Folder Structure After First Run:
 ```
 your_project/
-├── delete_duplicates.py
+├── dup_sniper.py
 ├── requirements.txt
 ├── logs/                  ← NEW: Log files here
 │   └── dedupe_log.txt
@@ -56,3 +56,4 @@ your_project/
 └── DUPLICATES/            ← Unchanged: Duplicates here
     └── images...
 ```
+

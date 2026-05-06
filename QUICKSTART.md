@@ -14,13 +14,13 @@ mkdir test_images
 # Copy a few images here
 
 # Run deduplication
-python delete_duplicates.py test_images
+python dup_sniper.py test_images
 ```
 
 ### 3. Real Run
 ```bash
 # Run on your actual dataset
-python delete_duplicates.py "C:/path/to/images"
+python dup_sniper.py "C:/path/to/images"
 ```
 
 ---
@@ -29,24 +29,24 @@ python delete_duplicates.py "C:/path/to/images"
 
 ### Standard Deduplication (Recommended)
 ```bash
-python delete_duplicates.py "C:/images" \
+python dup_sniper.py "C:/images" \
   --similarity 0.85 \
   --duplicates-dir "C:/images/DUPLICATES"
 ```
 
 ### Aggressive (Removes More)
 ```bash
-python delete_duplicates.py "C:/images" --similarity 0.75
+python dup_sniper.py "C:/images" --similarity 0.75
 ```
 
 ### Conservative (Removes Less)
 ```bash
-python delete_duplicates.py "C:/images" --similarity 0.90
+python dup_sniper.py "C:/images" --similarity 0.90
 ```
 
 ### High Performance (Many Threads)
 ```bash
-python delete_duplicates.py "C:/images" --threads 16
+python dup_sniper.py "C:/images" --threads 16
 ```
 
 ---
@@ -110,19 +110,19 @@ Log file:            dedupe_log.txt
 ### Q: It's too slow!
 **A**: Increase threads and ensure using SSD
 ```bash
-python delete_duplicates.py "C:/images" --threads 16
+python dup_sniper.py "C:/images" --threads 16
 ```
 
 ### Q: It removed too much!
 **A**: Increase threshold (be more conservative)
 ```bash
-python delete_duplicates.py "C:/images" --similarity 0.90
+python dup_sniper.py "C:/images" --similarity 0.90
 ```
 
 ### Q: It didn't remove enough!
 **A**: Decrease threshold (be more aggressive)
 ```bash
-python delete_duplicates.py "C:/images" --similarity 0.75
+python dup_sniper.py "C:/images" --similarity 0.75
 ```
 
 ### Q: How do I recover removed images?
@@ -194,7 +194,7 @@ Time:    2.5 hours (Similarity: 0.82)
 1. Check `dedupe_log.txt` for detailed operation log
 2. Review command-line help:
    ```bash
-   python delete_duplicates.py --help
+   python dup_sniper.py --help
    ```
 3. Consult `README_DEDUPLICATION.md` for in-depth documentation
 
@@ -211,7 +211,8 @@ Time:    2.5 hours (Similarity: 0.82)
 
 **You're ready! Start with:**
 ```bash
-python delete_duplicates.py "your_image_folder" --similarity 0.85
+python dup_sniper.py "your_image_folder" --similarity 0.85
 ```
 
 Happy deduplicating! 🚀
+

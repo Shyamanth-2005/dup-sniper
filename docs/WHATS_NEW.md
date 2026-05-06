@@ -455,12 +455,12 @@ pip install pillow imagehash opencv-contrib-python tqdm numpy scipy scikit-learn
 
 2. **Test**:
    ```bash
-   python delete_duplicates.py "C:/test_images"
+   python dup_sniper.py "C:/test_images"
    ```
 
 3. **Go Live**:
    ```bash
-   python delete_duplicates.py "C:/your_images" --similarity 0.85
+   python dup_sniper.py "C:/your_images" --similarity 0.85
    ```
 
 ### Learning Path
@@ -476,7 +476,7 @@ pip install pillow imagehash opencv-contrib-python tqdm numpy scipy scikit-learn
 1. **QUICKSTART.md** - Quick reference
 2. **README_DEDUPLICATION.md** - Full technical details
 3. **ADVANCED_USAGE.md** - Power user features
-4. Study: delete_duplicates.py source code (well-commented)
+4. Study: dup_sniper.py source code (well-commented)
 
 ---
 
@@ -491,10 +491,10 @@ pip install pillow imagehash opencv-contrib-python tqdm numpy scipy scikit-learn
 **Example**: This just works:
 ```bash
 # Command that worked before still works
-python delete_duplicates.py "/images" --duplicates-dir "./dups"
+python dup_sniper.py "/images" --duplicates-dir "./dups"
 
 # Plus new options (optional):
-python delete_duplicates.py "/images" --threads 16 --similarity 0.82
+python dup_sniper.py "/images" --threads 16 --similarity 0.82
 ```
 
 ---
@@ -519,3 +519,4 @@ The enhanced version transforms the basic deduplication tool into an **enterpris
 ---
 
 **You now have the most advanced open-source image deduplication tool available!** 🚀
+

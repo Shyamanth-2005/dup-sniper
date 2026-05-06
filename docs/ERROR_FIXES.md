@@ -122,7 +122,7 @@ Thumbs.db
 
 ## File Changes Summary
 
-### delete_duplicates.py
+### dup_sniper.py
 **Total Changes:** 10 functions updated
 
 | Function | Change | Benefit |
@@ -174,7 +174,7 @@ Thumbs.db
 mkdir test_imgs
 cp some_images_here test_imgs/
 # Intentionally delete one file after scan but before move
-python delete_duplicates.py test_imgs
+python dup_sniper.py test_imgs
 
 # Expected: Clean output, file gracefully skipped
 ```
@@ -229,3 +229,4 @@ Added support for logging at different levels:
 ✅ Prepared for Python 3.12+
 
 **Status:** Ready for production use! 🚀
+

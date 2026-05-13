@@ -30,7 +30,6 @@ pip install pillow imagehash opencv-contrib-python tqdm numpy scipy scikit-learn
 Usage:
 python delete_duplicates.py "C:/images"
 python delete_duplicates.py "C:/images" --similarity 0.82
-python delete_duplicates.py "C:/images" --duplicates-dir "C:/dups" --threads 8
 
 Recommended similarity thresholds:
 0.75-0.80 = aggressive (removes even subtle variations)

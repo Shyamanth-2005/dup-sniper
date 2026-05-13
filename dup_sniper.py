@@ -49,7 +49,11 @@ import sqlite3
 import json
 import logging
 import warnings
+import time
+import uuid
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from PIL import Image
 from tqdm import tqdm
@@ -70,7 +74,7 @@ except ImportError:
     ssim = None
 
 try:
-    import faiss
+    import faiss  # pyright: ignore[reportMissingImports]
     HAS_FAISS = True
 except ImportError:
     HAS_FAISS = False
@@ -118,66 +122,95 @@ class CacheDB:
         self.db_path = db_path
         self.init_db()
 
+    def _connect(self):
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn.execute('PRAGMA busy_timeout = 30000')
+        return conn
+
     def init_db(self):
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS file_hashes (
-                file_path TEXT PRIMARY KEY,
-                md5 TEXT,
-                phash TEXT,
-                dhash TEXT,
-                whash TEXT,
-                histogram_hash TEXT,
-                processed_at TIMESTAMP
-            )
-        ''')
-        
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS duplicates_log (
-                id INTEGER PRIMARY KEY,
-                original TEXT,
-                duplicate TEXT,
-                detection_method TEXT,
-                similarity_score REAL,
-                moved_at TIMESTAMP
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
+        conn = self._connect()
+        try:
+            conn.execute('PRAGMA journal_mode = WAL')
+            conn.execute('PRAGMA synchronous = NORMAL')
+            conn.execute('PRAGMA busy_timeout = 30000')
+            c = conn.cursor()
+
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS file_hashes (
+                    file_path TEXT PRIMARY KEY,
+                    md5 TEXT,
+                    phash TEXT,
+                    dhash TEXT,
+                    whash TEXT,
+                    histogram_hash TEXT,
+                    processed_at TIMESTAMP
+                )
+            ''')
+
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS duplicates_log (
+                    id INTEGER PRIMARY KEY,
+                    original TEXT,
+                    duplicate TEXT,
+                    detection_method TEXT,
+                    similarity_score REAL,
+                    moved_at TIMESTAMP
+                )
+            ''')
+
+            conn.commit()
+        finally:
+            conn.close()
 
     def get_cached_hashes(self, file_path):
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute('SELECT md5, phash, dhash, whash, histogram_hash FROM file_hashes WHERE file_path = ?', (file_path,))
-        result = c.fetchone()
-        conn.close()
-        return result
+        conn = self._connect()
+        try:
+            c = conn.cursor()
+            c.execute('SELECT md5, phash, dhash, whash, histogram_hash FROM file_hashes WHERE file_path = ?', (file_path,))
+            return c.fetchone()
+        finally:
+            conn.close()
 
     def cache_hashes(self, file_path, md5, phash, dhash, whash, hist_hash):
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute('''
-            INSERT OR REPLACE INTO file_hashes 
-            (file_path, md5, phash, dhash, whash, histogram_hash, processed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (file_path, md5, phash, dhash, whash, hist_hash, datetime.now()))
-        conn.commit()
-        conn.close()
+        for attempt in range(3):
+            conn = self._connect()
+            try:
+                c = conn.cursor()
+                c.execute('''
+                    INSERT OR REPLACE INTO file_hashes 
+                    (file_path, md5, phash, dhash, whash, histogram_hash, processed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (file_path, md5, phash, dhash, whash, hist_hash, datetime.now()))
+                conn.commit()
+                return
+            except sqlite3.OperationalError as e:
+                if 'locked' in str(e).lower() and attempt < 2:
+                    time.sleep(0.2 * (attempt + 1))
+                    continue
+                raise
+            finally:
+                conn.close()
 
     def log_duplicate(self, original, duplicate, method, score):
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute('''
-            INSERT INTO duplicates_log 
-            (original, duplicate, detection_method, similarity_score, moved_at)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (original, duplicate, method, score, datetime.now()))
-        conn.commit()
-        conn.close()
+        for attempt in range(3):
+            conn = self._connect()
+            try:
+                c = conn.cursor()
+                c.execute('''
+                    INSERT INTO duplicates_log 
+                    (original, duplicate, detection_method, similarity_score, moved_at)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (original, duplicate, method, score, datetime.now()))
+                conn.commit()
+                return
+            except sqlite3.OperationalError as e:
+                if 'locked' in str(e).lower() and attempt < 2:
+                    time.sleep(0.2 * (attempt + 1))
+                    continue
+                raise
+            finally:
+                conn.close()
 
 
 cache_db = CacheDB()
@@ -261,17 +294,13 @@ def move_to_duplicates(src_path, root_dir, duplicates_dir):
             stem = Path(target_path).stem
             suffix = Path(target_path).suffix
             parent = Path(target_path).parent
-            counter = 1
-
             while True:
-                new_name = f"{stem}_{counter}{suffix}"
-                new_path = parent / new_name
+                unique_name = f"{stem}_{uuid.uuid4().hex[:8]}{suffix}"
+                new_path = parent / unique_name
 
                 if not new_path.exists():
                     target_path = str(new_path)
                     break
-
-                counter += 1
 
         shutil.move(src_path, target_path)
         return target_path
@@ -363,6 +392,156 @@ def compute_histogram_hash(path, bins=16):
         return None
 
 
+def histogram_bucket_signature(hist, segments=8):
+    """
+    Build a compact, comparable signature for histogram bucketing.
+    """
+    if hist is None:
+        return None
+
+    try:
+        if segments <= 0:
+            segments = 8
+
+        parts = np.array_split(hist.astype(np.float32), segments)
+        bucket = []
+
+        for part in parts:
+            segment_score = float(part.sum())
+            bucket.append(str(min(9, max(0, int(round(segment_score * 9))))))
+
+        return ''.join(bucket)
+    except Exception:
+        return None
+
+
+def histogram_bucket_signatures(hist):
+    """
+    Produce multiple histogram signatures at different granularities.
+    This broadens candidate matching without falling back to all-pairs.
+    """
+    signatures = set()
+
+    for segments in (4, 8):
+        signature = histogram_bucket_signature(hist, segments=segments)
+        if signature is not None:
+            signatures.add(signature)
+
+    return signatures
+
+
+def stage5_bucket_keys(data):
+    """
+    Combine rotation-aware pHash prefixes with histogram structure for Stage 5.
+    Multiple keys make the candidate filter more conservative.
+    """
+    hashes = data.get('hashes') or []
+    hist_signatures = histogram_bucket_signatures(data.get('histogram'))
+    keys = set()
+
+    for hash_item in hashes:
+        for hash_name in ('phash', 'dhash', 'whash'):
+            hash_value = hash_item.get(hash_name, '')
+            if not hash_value:
+                continue
+
+            for prefix_length in (4, 8):
+                prefix = hash_value[:prefix_length]
+                for hist_signature in hist_signatures:
+                    keys.add(f"{hash_name}:{prefix}:{hist_signature}")
+
+    if not keys:
+        for hist_signature in hist_signatures or {'nohist'}:
+            keys.add(f":{hist_signature}")
+
+    return keys
+
+
+def stage4_bucket_keys(data):
+    """
+    Histogram-only grouping for resized/compressed comparisons.
+    """
+    return histogram_bucket_signatures(data.get('histogram'))
+
+
+def subdivide_bucket_by_strict_hash(group, hash_db, depth=0):
+    """
+    Recursively subdivide a large bucket using strict hash prefixes.
+    Prevents one massive bucket from blocking Stage 5 for days.
+    """
+    if len(group) <= 50 or depth > 3:
+        return [group]
+
+    sub_buckets = defaultdict(list)
+
+    for path in group:
+        if path not in hash_db or not hash_db[path]['hashes']:
+            sub_buckets[f"nosub_{depth}"].append(path)
+            continue
+
+        # Use increasingly strict prefixes per depth: 1→2→3→4 chars
+        hash_item = hash_db[path]['hashes'][0]
+        phash = hash_item.get('phash', '')
+        prefix_len = max(1, 4 - depth)  # depth 0: 4 chars, depth 1: 3, etc.
+        prefix = phash[:prefix_len] if phash else "none"
+
+        sub_buckets[prefix].append(path)
+
+    result = []
+    for sub_group in sub_buckets.values():
+        if len(sub_group) > 50:
+            # Keep subdividing if still too large
+            result.extend(subdivide_bucket_by_strict_hash(sub_group, hash_db, depth + 1))
+        else:
+            result.append(sub_group)
+
+    return result
+
+
+def build_candidate_components(paths, hash_db, key_builder):
+    """
+    Build connected components from overlapping candidate buckets.
+    Each component can be processed independently without a global pair set.
+    """
+    bucket_to_paths = defaultdict(list)
+
+    for path in paths:
+        if path not in hash_db:
+            continue
+
+        bucket_keys = key_builder(hash_db[path])
+        for bucket_key in bucket_keys:
+            bucket_to_paths[bucket_key].append(path)
+
+    parent = {}
+
+    def find(item):
+        parent.setdefault(item, item)
+        if parent[item] != item:
+            parent[item] = find(parent[item])
+        return parent[item]
+
+    def union(item_a, item_b):
+        root_a = find(item_a)
+        root_b = find(item_b)
+        if root_a != root_b:
+            parent[root_b] = root_a
+
+    for group in bucket_to_paths.values():
+        if len(group) <= 1:
+            continue
+
+        anchor = group[0]
+        for item in group[1:]:
+            union(anchor, item)
+
+    components = defaultdict(list)
+    for path in parent:
+        components[find(path)].append(path)
+
+    return [group for group in components.values() if len(group) > 1]
+
+
 # ============================================================
 # ADVANCED SIMILARITY METRICS
 # ============================================================
@@ -378,8 +557,9 @@ def perceptual_hash_similarity(hash1, hash2):
         h1 = imagehash.hex_to_hash(hash1)
         h2 = imagehash.hex_to_hash(hash2)
         distance = h1 - h2
-        # Convert hamming distance to similarity (0-1)
-        similarity = 1.0 - (distance / 64.0)
+        # Convert Hamming distance to similarity (0-1) using the actual bit width.
+        total_bits = max(int(h1.hash.size), int(h2.hash.size), 1)
+        similarity = 1.0 - (distance / float(total_bits))
         return max(0, similarity)
     except:
         return 0.0
@@ -451,7 +631,12 @@ def sift_similarity(path1, path2):
         kp1, des1 = sift.detectAndCompute(img1, None)
         kp2, des2 = sift.detectAndCompute(img2, None)
 
-        if des1 is None or des2 is None:
+        if (
+            des1 is None or des2 is None or
+            kp1 is None or kp2 is None or
+            len(kp1) < 2 or len(kp2) < 2 or
+            len(des1) < 2 or len(des2) < 2
+        ):
             return 0.0
 
         # Flann matcher for SIFT
@@ -506,7 +691,12 @@ def orb_similarity(path1, path2):
         kp1, des1 = orb.detectAndCompute(img1, None)
         kp2, des2 = orb.detectAndCompute(img2, None)
 
-        if des1 is None or des2 is None:
+        if (
+            des1 is None or des2 is None or
+            kp1 is None or kp2 is None or
+            len(kp1) < 2 or len(kp2) < 2 or
+            len(des1) < 2 or len(des2) < 2
+        ):
             return 0.0
 
         matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
@@ -529,10 +719,13 @@ def orb_similarity(path1, path2):
         return 0.0
 
 
-def ensemble_similarity(path1, path2, threshold=0.85):
+def ensemble_similarity(path1, path2, threshold=0.85, hist1=None, hist2=None, skip_sift=False):
     """
     Ensemble approach combining multiple similarity metrics
     Returns 0-1 similarity score
+    
+    Args:
+        skip_sift: if True, skip SIFT and use ORB + histogram only (fast mode for large buckets)
     """
     scores = []
     weights = []
@@ -542,25 +735,51 @@ def ensemble_similarity(path1, path2, threshold=0.85):
             logger.debug(f"Ensemble: One or both files missing")
             return 0.0
 
-        # 1. ORB Similarity (70% weight - fast and effective)
+        # 1. ORB Similarity (fast structural signal)
         orb_sim = orb_similarity(path1, path2)
+        
+        # EARLY REJECTION: if ORB is very low, images are clearly different
+        # Skip expensive SIFT computation entirely (huge speedup)
+        if orb_sim < 0.55 and skip_sift:
+            return 0.0
+        if orb_sim < 0.50 and not skip_sift:
+            return 0.0
+        
         scores.append(orb_sim)
-        weights.append(0.70)
+        weights.append(0.55)
 
-        # 2. SIFT Similarity (20% weight - more accurate but slower)
-        sift_sim = sift_similarity(path1, path2)
-        scores.append(sift_sim)
-        weights.append(0.20)
+        # 2. SIFT Similarity (more accurate but slower) - skip for large buckets
+        if not skip_sift:
+            sift_sim = sift_similarity(path1, path2)
+            scores.append(sift_sim)
+            weights.append(0.30)
+        else:
+            sift_sim = 0.0  # Zero weight for skipped SIFT in fast mode
+            # Rebalance weights: ORB 0.70, histogram 0.30 (skip SIFT)
 
-        # 3. Histogram Similarity (10% weight - color/brightness)
-        hist1 = compute_histogram_hash(path1)
-        hist2 = compute_histogram_hash(path2)
+        # 3. Histogram Similarity (color/brightness)
+        if hist1 is None:
+            hist1 = compute_histogram_hash(path1)
+        if hist2 is None:
+            hist2 = compute_histogram_hash(path2)
         hist_sim = histogram_similarity(hist1, hist2)
         scores.append(hist_sim)
-        weights.append(0.10)
+        if skip_sift:
+            weights.append(0.30)  # Higher weight on histogram in fast mode
+        else:
+            weights.append(0.15)
 
         if not scores:
             return 0.0
+
+        if skip_sift:
+            # In fast mode, only check ORB
+            if orb_sim >= 0.98:
+                return max(orb_sim, hist_sim)
+        else:
+            # In full mode, check both ORB and SIFT
+            if max(orb_sim, sift_sim) >= 0.98:
+                return max(orb_sim, sift_sim, hist_sim)
 
         ensemble_score = sum(s * w for s, w in zip(scores, weights)) / sum(weights)
         return ensemble_score
@@ -612,13 +831,14 @@ def process_image_batch(paths):
             })
 
             if md5:
+                hist_signature = histogram_bucket_signature(hist)
                 cache_db.cache_hashes(
                     path,
                     md5,
                     hashes[0]['phash'] if hashes else None,
                     hashes[0]['dhash'] if hashes else None,
                     hashes[0]['whash'] if hashes else None,
-                    None
+                    hist_signature
                 )
 
         except Exception as e:
@@ -642,7 +862,9 @@ def deduplicate(
     """
 
     os.makedirs(duplicates_dir, exist_ok=True)
-    num_threads = num_threads or min(cpu_count(), 8)
+    num_threads = num_threads or (cpu_count() or 1)
+    # Cap threads at 5 for optimal CPU utilization and reduced context switching
+    num_threads = max(1, min(num_threads, 5))
 
     logger.info(f"\n{'='*60}")
     logger.info(f"Advanced Image Deduplication Starting")
@@ -710,23 +932,30 @@ def deduplicate(
     # STAGE 2: BUILD HASH INDEX
     # ========================================================
 
-    logger.info("STAGE 2: Building perceptual hash index...")
-    print("STAGE 2: Building perceptual hash index...\n")
+    logger.info("STAGE 2: Building perceptual hash index (parallelized)...")
+    print("STAGE 2: Building perceptual hash index (parallelized)...\n")
 
     remaining = [p for p in image_files if p not in moved]
 
     hash_db = {}
 
-    for path in tqdm(remaining, desc="Generating hashes"):
-        try:
-            hashes = generate_multi_level_hashes(path)
-            histogram = compute_histogram_hash(path)
-            hash_db[path] = {
-                'hashes': hashes,
-                'histogram': histogram
+    # OPTIMIZATION: Parallelize hash generation across CPU cores using multiprocessing
+    batch_size = max(10, len(remaining) // (num_threads * 4))
+    batches = [remaining[i:i+batch_size] for i in range(0, len(remaining), batch_size)]
+    
+    with Pool(processes=num_threads) as pool:
+        batch_results = list(tqdm(
+            pool.imap_unordered(process_image_batch, batches),
+            total=len(batches),
+            desc="Generating hashes"
+        ))
+    
+    for batch_result in batch_results:
+        for item in batch_result:
+            hash_db[item['path']] = {
+                'hashes': item['hashes'],
+                'histogram': item['histogram']
             }
-        except Exception as e:
-            logger.warning(f"Failed hash generation for {path}: {e}")
 
     # ========================================================
     # STAGE 3: ROTATED/RESIZED DUPLICATES (PHASH-based)
@@ -735,29 +964,24 @@ def deduplicate(
     logger.info("STAGE 3: Detecting rotated and resized duplicates...")
     print("STAGE 3: Detecting rotated and resized duplicates...\n")
 
-    checked_pairs = set()
     phash_map = defaultdict(list)
 
-    # Build phash groups
+    # Build phash groups from all rotation variants
     for path, data in hash_db.items():
         if data['hashes']:
-            phash = data['hashes'][0]['phash']
-            phash_map[phash].append(path)
+            for hash_item in data['hashes']:
+                phash_map[hash_item['phash']].append(path)
 
     for phash, group in tqdm(phash_map.items(), desc="Checking phash groups"):
         if len(group) <= 1:
             continue
 
+        group = list(dict.fromkeys(group))
+
         for i, p1 in enumerate(group):
             for p2 in group[i+1:]:
                 if p1 in moved or p2 in moved:
                     continue
-
-                pair_key = tuple(sorted([p1, p2]))
-                if pair_key in checked_pairs:
-                    continue
-
-                checked_pairs.add(pair_key)
 
                 # Check all rotation variants
                 max_sim = 0
@@ -786,42 +1010,55 @@ def deduplicate(
     # STAGE 4: COMPRESSED/RESIZED (histogram + histogram similarity)
     # ========================================================
 
-    logger.info("STAGE 4: Detecting compressed and resized variants...")
-    print("STAGE 4: Detecting compressed and resized variants...\n")
+    logger.info("STAGE 4: Detecting compressed and resized variants (parallelized)...")
+    print("STAGE 4: Detecting compressed and resized variants (parallelized)...\n")
 
     remaining = [p for p in remaining if p not in moved]
 
-    for i in tqdm(range(len(remaining)), desc="Checking histogram similarity"):
-        p1 = remaining[i]
+    hist_components = build_candidate_components(remaining, hash_db, stage4_bucket_keys)
 
-        if p1 in moved or p1 not in hash_db:
-            continue
+    # OPTIMIZATION: Parallelize Stage 4 bucket processing using ThreadPoolExecutor
+    def process_stage4_group(group):
+        local_results = []
+        group = [p for p in group if p not in moved]
 
-        for j in range(i + 1, len(remaining)):
-            p2 = remaining[j]
-
-            if p2 in moved or p2 not in hash_db:
+        for i, p1 in enumerate(group):
+            if p1 in moved:
                 continue
 
-            pair_key = tuple(sorted([p1, p2]))
-            if pair_key in checked_pairs:
-                continue
+            for p2 in group[i + 1:]:
+                if p2 in moved:
+                    continue
 
-            checked_pairs.add(pair_key)
+                hist_sim = histogram_similarity(
+                    hash_db[p1]['histogram'],
+                    hash_db[p2]['histogram']
+                )
 
-            hist_sim = histogram_similarity(
-                hash_db[p1]['histogram'],
-                hash_db[p2]['histogram']
-            )
+                if hist_sim > 0.92:
+                    score1 = get_image_quality_score(p1)
+                    score2 = get_image_quality_score(p2)
+                    keep = p1 if score1 >= score2 else p2
+                    remove = p2 if keep == p1 else p1
 
-            if hist_sim > 0.92:
-                score1 = get_image_quality_score(p1)
-                score2 = get_image_quality_score(p2)
-                keep = p1 if score1 >= score2 else p2
-                remove = p2 if keep == p1 else p1
+                    moved_path = move_to_duplicates(remove, directory, duplicates_dir)
+                    if moved_path:
+                        local_results.append((keep, remove, hist_sim, moved_path))
+        
+        return local_results
 
-                moved_path = move_to_duplicates(remove, directory, duplicates_dir)
-                if moved_path:
+    if hist_components:
+        with ThreadPoolExecutor(max_workers=num_threads, thread_name_prefix="stage4") as executor:
+            futures = [executor.submit(process_stage4_group, group) for group in hist_components]
+
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Checking histogram buckets"):
+                try:
+                    results = future.result()
+                except Exception as e:
+                    logger.exception(f"Stage 4 worker failed: {e}")
+                    continue
+
+                for keep, remove, hist_sim, moved_path in results:
                     moved.add(remove)
                     stats['resized_duplicates'] += 1
                     cache_db.log_duplicate(keep, remove, 'HISTOGRAM', hist_sim)
@@ -839,39 +1076,138 @@ def deduplicate(
 
     remaining = [p for p in remaining if p not in moved]
 
-    for i in tqdm(range(len(remaining)), desc="Ensemble comparison"):
-        p1 = remaining[i]
+    stage5_groups = build_candidate_components(remaining, hash_db, stage5_bucket_keys)
 
-        if p1 in moved:
-            continue
+    def process_stage5_group(group):
+        local_moved = set()
+        bucket_results = []
 
-        for j in range(i + 1, len(remaining)):
-            p2 = remaining[j]
+        # Add per-bucket diagnostics and a periodic heartbeat so long-running
+        # buckets provide visible progress in the logs.
+        heartbeat_interval = 200
+        LARGE_BUCKET_THRESHOLD = 50  # Skip SIFT for buckets > 50 items
 
-            if p2 in moved:
-                continue
+        try:
+            start_time = time.time()
+            total_items = len(group)
+            total_pairs = total_items * (total_items - 1) // 2
+            comparisons = 0
+            is_large_bucket = total_items > LARGE_BUCKET_THRESHOLD
+            mode_str = "FAST (no SIFT)" if is_large_bucket else "FULL (with SIFT)"
 
-            pair_key = tuple(sorted([p1, p2]))
-            if pair_key in checked_pairs:
-                continue
+            logger.info(
+                f"[STAGE5 START] Thread={threading.current_thread().name} size={total_items} "
+                f"estimated_pairs={total_pairs} mode={mode_str}"
+            )
 
-            checked_pairs.add(pair_key)
+            quality_scores = {
+                path: get_image_quality_score(path)
+                for path in group
+            }
 
-            similarity = ensemble_similarity(p1, p2, similarity_threshold)
+            ordered_group = sorted(
+                group,
+                key=lambda path: quality_scores.get(path, 0),
+                reverse=True
+            )
 
-            if similarity >= similarity_threshold:
-                score1 = get_image_quality_score(p1)
-                score2 = get_image_quality_score(p2)
-                keep = p1 if score1 >= score2 else p2
-                remove = p2 if keep == p1 else p1
+            for i, p1 in enumerate(ordered_group):
+                if p1 in local_moved:
+                    continue
 
-                moved_path = move_to_duplicates(remove, directory, duplicates_dir)
-                if moved_path:
+                for p2 in ordered_group[i + 1:]:
+                    if p2 in local_moved:
+                        continue
+
+                    comparisons += 1
+                    if comparisons % heartbeat_interval == 0 or comparisons == total_pairs:
+                        elapsed = time.time() - start_time
+                        logger.info(
+                            f"[STAGE5 HEARTBEAT] Thread={threading.current_thread().name} "
+                            f"size={total_items} progress={comparisons}/{total_pairs} "
+                            f"elapsed={elapsed:.1f}s"
+                        )
+
+                    similarity = ensemble_similarity(
+                        p1,
+                        p2,
+                        similarity_threshold,
+                        hist1=hash_db[p1]['histogram'],
+                        hist2=hash_db[p2]['histogram'],
+                        skip_sift=is_large_bucket
+                    )
+
+                    if similarity >= similarity_threshold:
+                        score1 = quality_scores.get(p1, 0)
+                        score2 = quality_scores.get(p2, 0)
+                        keep = p1 if score1 >= score2 else p2
+                        remove = p2 if keep == p1 else p1
+
+                        if remove in local_moved:
+                            continue
+
+                        moved_path = move_to_duplicates(remove, directory, duplicates_dir)
+                        if moved_path:
+                            local_moved.add(remove)
+                            bucket_results.append((keep, remove, similarity, moved_path))
+
+            duration = time.time() - start_time
+            logger.info(
+                f"[STAGE5 DONE] Thread={threading.current_thread().name} size={total_items} "
+                f"moved={len(local_moved)} mode={mode_str} duration={duration:.1f}s"
+            )
+
+        except Exception as e:
+            logger.exception(f"Stage 5 group failed: {e}")
+
+        return bucket_results
+
+    if stage5_groups:
+        # Filter and subdivide to prevent 65M-pair catastrophes
+        MAX_PAIRS = 100000  # Skip buckets exceeding 100K pairs
+        filtered_groups = []
+        skipped_count = 0
+
+        for group in stage5_groups:
+            group_size = len(group)
+            pair_count = group_size * (group_size - 1) // 2
+
+            if pair_count > MAX_PAIRS:
+                # Subdivide into smaller independent sub-buckets
+                sub_groups = subdivide_bucket_by_strict_hash(group, hash_db)
+                logger.warning(
+                    f"[STAGE5 SUBDIVIDE] Large bucket (size={group_size}, pairs={pair_count:,}) "
+                    f"split into {len(sub_groups)} sub-buckets"
+                )
+                filtered_groups.extend(sub_groups)
+                skipped_count += 1
+            else:
+                filtered_groups.append(group)
+
+        if skipped_count > 0:
+            logger.info(f"[STAGE5] Subdivided {skipped_count} large buckets for safety")
+            print(f"\nStage 5: Subdivided {skipped_count} large bucket(s) into manageable sizes...\n")
+
+        stage5_groups = filtered_groups
+
+        with ThreadPoolExecutor(max_workers=num_threads, thread_name_prefix="stage5") as executor:
+            futures = [executor.submit(process_stage5_group, group) for group in stage5_groups]
+
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Ensemble buckets"):
+                try:
+                    bucket_results = future.result()
+                except Exception as e:
+                    logger.exception(f"Stage 5 worker failed: {e}")
+                    continue
+
+                for keep, remove, similarity, moved_path in bucket_results:
                     moved.add(remove)
                     stats['similar_duplicates'] += 1
                     cache_db.log_duplicate(keep, remove, 'ENSEMBLE', similarity)
                     logger.info(f"[SIMILAR] Sim: {similarity:.3f} | KEEP: {keep}")
                     logger.info(f"[SIMILAR] MOVED: {moved_path}")
+    else:
+        print("No Stage 5 candidate buckets found.\n")
 
     stats['total_moved'] = len(moved)
 
